@@ -11,6 +11,7 @@ local list_renderer = require('fff.list_renderer')
 local scrollbar = require('fff.scrollbar')
 local rust = require('fff.rust')
 local layout = require('fff.layout')
+local oldfiles = require('fff.oldfiles')
 
 local canonicalize_fff_path = utils.canonicalize_fff_path
 
@@ -751,6 +752,13 @@ function M.update_results_sync()
       end
     end
     M.state.location = nil -- Location comes from selected item, not query
+  elseif M.state.mode == 'oldfiles' then
+    if M.state.query == '' then
+      results = oldfiles.get_old_files()
+    else
+      results = oldfiles.search_old_files(M.state.query)
+    end
+    M.state.pagination.total_matched = #results
   else
     -- File picker mode: use fuzzy search
     results = file_picker.search_files_paginated(
@@ -856,6 +864,8 @@ function M.load_page_at_index(new_page_index, adjust_cursor_fn)
         M.state.pagination.grep_file_offsets[new_page_index + 2] = grep_result.next_file_offset
       end
     end
+  elseif M.state.mode == 'oldfiles' then
+    return false
   else
     ok, results = pcall(
       file_picker.search_files_paginated,
@@ -879,7 +889,7 @@ function M.load_page_at_index(new_page_index, adjust_cursor_fn)
   -- CRITICAL: Update total_matched from the latest search metadata
   -- This prevents stale total_matched values that can cause out-of-bounds pagination
   -- For grep, total_matched was already updated above when extracting grep_result.
-  if M.state.mode ~= 'grep' then
+  if M.state.mode ~= 'grep' and M.state.mode ~= 'oldfiles' then
     local metadata = file_picker.get_search_metadata()
     M.state.pagination.total_matched = metadata.total_matched
   end
@@ -1448,10 +1458,12 @@ function M.update_preview()
 
   local location_changed = not vim.deep_equal(M.state.last_preview_location, effective_location)
 
-  if M.state.last_preview_file == item.relative_path and not location_changed then return end
+  local abs_or_relative = M.state.mode == 'oldfiles' and item.path or item.relative_path
+
+  if M.state.last_preview_file == abs_or_relative and not location_changed then return end
 
   -- Same file, different location: just scroll and re-highlight instead of reloading
-  if M.state.last_preview_file == item.relative_path and location_changed then
+  if M.state.last_preview_file == abs_or_relative and location_changed then
     M.state.last_preview_location = effective_location and vim.deepcopy(effective_location) or nil
     preview.state.location = effective_location
     -- Update title with new line number for grep/suggestion mode
@@ -1466,7 +1478,8 @@ function M.update_preview()
 
   preview.clear()
 
-  M.state.last_preview_file = item.relative_path
+  M.state.last_preview_file = abs_or_relative
+
   M.state.last_preview_location = effective_location and vim.deepcopy(effective_location) or nil
 
   M.update_preview_title(item, effective_location)
@@ -1480,7 +1493,9 @@ function M.update_preview()
   end
 
   preview.set_preview_window(M.state.preview_win)
-  preview.preview(canonicalize_fff_path(item.relative_path), M.state.preview_buf, effective_location, item.is_binary)
+
+  local preview_path = abs_or_relative or nil
+  preview.preview(canonicalize_fff_path(preview_path), M.state.preview_buf, effective_location, item.is_binary)
 end
 
 --- Clear preview
@@ -1584,6 +1599,13 @@ function M.update_status(progress)
   local status_info
   if progress and progress.is_scanning then
     status_info = string.format('Indexing files %d', progress.scanned_files_count)
+  elseif M.state.mode == 'oldfiles' then
+    local oldfiles_metadata = oldfiles.get_oldfiles_metadata()
+    if #M.state.query < 2 then
+      status_info = string.format('%d', oldfiles_metadata.total_files)
+    else
+      status_info = string.format('%d/%d', oldfiles_metadata.total_matched, oldfiles_metadata.total_files)
+    end
   else
     local search_metadata = file_picker.get_search_metadata()
     if #M.state.query < 2 then
@@ -2491,7 +2513,7 @@ function M.open(opts)
   local merged_config, base_path = initialize_picker(opts)
   if not merged_config then return end
 
-  if base_path then require('fff.core').change_indexing_directory(base_path) end
+  if base_path and M.state.mode ~= 'oldfiles' then require('fff.core').change_indexing_directory(base_path) end
 
   -- Initialize grep_mode to first configured mode when opening in grep mode
   if M.state.mode == 'grep' then

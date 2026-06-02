@@ -602,4 +602,17 @@ function M.open_file_under_cursor(open_cb)
   end)
 end
 
+--- Find oldfiles in nvim
+function M.find_oldfiles()
+  local picker_ok, picker_ui = pcall(require, 'fff.picker_ui')
+  if picker_ok then
+    picker_ui.open({
+      title = 'OldFFFiles',
+      mode = 'oldfiles',
+    })
+  else
+    vim.notify('Failed to load picker UI for oldfiles', vim.log.levels.ERROR)
+  end
+end
+
 return M

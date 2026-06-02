@@ -578,7 +578,7 @@ function M.get_file_config(file_path)
   return M.config.filetypes[filetype] or {}
 end
 
---- @param file_path string Path to the file or directory
+--- @param file_path string|nil Path to the file or directory
 --- @param bufnr number Buffer number for preview
 --- @param location table|nil Optional location data for highlighting
 --- @param is_binary boolean|nil Whether the file is binary (from Rust indexer)
